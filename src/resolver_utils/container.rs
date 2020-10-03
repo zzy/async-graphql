@@ -2,7 +2,7 @@ use crate::extensions::{ErrorLogger, Extension, ExtensionContext, ResolveInfo};
 use crate::parser::types::Selection;
 use crate::registry::MetaType;
 use crate::{
-    Context, ContextSelectionSet, OutputValueType, PathSegment, ServerError, ServerResult, Value,
+    Context, ContextSelectionSet, OutputValueType, PathSegment, ServerError, ServerResult,
 };
 use std::future::Future;
 use std::pin::Pin;
@@ -45,7 +45,7 @@ pub trait ContainerType: OutputValueType {
     async fn find_entity(
         &self,
         _: &Context<'_>,
-        _params: &Value,
+        _params: &serde_value::Value,
     ) -> ServerResult<Option<serde_json::Value>> {
         Ok(None)
     }

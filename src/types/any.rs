@@ -1,32 +1,19 @@
-use crate::{InputValueResult, Scalar, ScalarType, Value};
-use serde::de::DeserializeOwned;
+use crate::Scalar;
+use serde_value::Value;
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
 /// Any scalar (For [Apollo Federation](https://www.apollographql.com/docs/apollo-server/federation/introduction))
 ///
 /// The `Any` scalar is used to pass representations of entities from external services into the root `_entities` field for execution.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Scalar, Serialize, Deserialize)]
+#[graphql(internal, name = "_Any")]
+#[serde(transparent)]
 pub struct Any(pub Value);
 
-/// The `_Any` scalar is used to pass representations of entities from external services into the root `_entities` field for execution.
-#[Scalar(internal, name = "_Any")]
-impl ScalarType for Any {
-    fn parse(value: Value) -> InputValueResult<Self> {
-        Ok(Self(value))
-    }
-
-    fn is_valid(_value: &Value) -> bool {
-        true
-    }
-
-    fn to_value(&self) -> Value {
-        self.0.clone()
-    }
-}
-
 impl Any {
-    /// Parse this `Any` value to T by `serde_json`.
-    pub fn parse_value<T: DeserializeOwned>(&self) -> serde_json::Result<T> {
-        serde_json::from_value(self.to_value().into_json()?)
+    /// Parse this `Any` value to T.
+    pub fn parse_value<T: DeserializeOwned>(self) -> Result<T, serde_value::DeserializerError> {
+        self.0.deserialize_into()
     }
 }
 

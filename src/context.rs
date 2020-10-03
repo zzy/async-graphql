@@ -5,8 +5,9 @@ use crate::parser::types::{
 };
 use crate::schema::SchemaEnv;
 use crate::{
-    Error, InputValueType, Lookahead, Pos, Positioned, Result, ServerError, ServerResult, Value,
+    Error, InputValueType, Lookahead, Pos, Positioned, Result, ServerError, ServerResult,
 };
+use serde_value::Value;
 use fnv::FnvHashMap;
 use serde::ser::{SerializeSeq, Serializer};
 use serde::{Deserialize, Serialize};
@@ -34,7 +35,7 @@ impl Display for Variables {
 }
 
 impl Variables {
-    /// Get the variables from a GraphQL value.
+    /// Get the variables from a serde value.
     ///
     /// If the value is not a map, then no variables will be returned.
     #[must_use]
@@ -56,13 +57,19 @@ impl Variables {
             .unwrap_or_default()
     }
 
-    /// Get the variables as a GraphQL value.
+    /// Get the variables as a serde value.
     #[must_use]
     pub fn into_value(self) -> Value {
         Value::Object(self.0)
     }
 
-    pub(crate) fn variable_path(&mut self, path: &str) -> Option<&mut Value> {
+    /// Get a mutable reference to the variable with the specified path.
+    ///
+    /// The path is a dot-separated path to the item that begins with `variables`, for example
+    /// `variables.files.2.content` is equivalent to the Rust code
+    /// `variables["files"][2]["content"]`. If no variable exists at the path this function will
+    /// return `None`.
+    pub fn variable_path(&mut self, path: &str) -> Option<&mut Value> {
         let mut parts = path.strip_prefix("variables.")?.split('.');
 
         let initial = self.0.get_mut(parts.next().unwrap())?;
@@ -421,8 +428,7 @@ impl<'a, T> ContextBase<'a, T> {
             let pos = condition_input.pos;
             let condition_input = self.resolve_input_value(condition_input)?;
 
-            if include
-                != <bool as InputValueType>::parse(Some(condition_input))
+            if include != bool::deserialize(condition_input)
                     .map_err(|e| e.into_server_error().at(pos))?
             {
                 return Ok(true);
@@ -467,7 +473,9 @@ impl<'a> ContextBase<'a, &'a Positioned<Field>> {
             Some(value) => (value.pos, Some(self.resolve_input_value(value)?)),
             None => (Pos::default(), None),
         };
-        InputValueType::parse(value).map_err(|e| e.into_server_error().at(pos))
+        // TODO: https://github.com/async-graphql/async-graphql/issues/295#issuecomment-703119755
+        let value = value.flatten();
+        T::deserialize(value).map_err(|e| e.into_server_error().at(pos))
     }
 
     /// Creates a uniform interface to inspect the forthcoming selections.

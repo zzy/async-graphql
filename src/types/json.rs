@@ -1,8 +1,8 @@
 use crate::parser::types::Field;
 use crate::registry::{MetaType, Registry};
 use crate::{
-    ContextSelectionSet, InputValueResult, OutputValueType, Positioned, Scalar, ScalarType,
-    ServerResult, Type, Value,
+    ContextSelectionSet, OutputValueType, Positioned, Scalar,
+    ServerResult, Type,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -12,9 +12,10 @@ use std::ops::{Deref, DerefMut};
 /// A scalar that can represent any JSON value.
 ///
 /// If the inner type cannot be serialized as JSON (e.g. it has non-string keys) it will be `null`.
-#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, Hash, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, Hash, Default, Scalar)]
+#[graphql(internal)]
 #[serde(transparent)]
-pub struct Json<T>(pub T);
+pub struct Json<T: Serialize + DeserializeOwned + Send>(pub T);
 
 impl<T> Deref for Json<T> {
     type Target = T;
@@ -33,21 +34,6 @@ impl<T> DerefMut for Json<T> {
 impl<T: DeserializeOwned + Serialize> From<T> for Json<T> {
     fn from(value: T) -> Self {
         Self(value)
-    }
-}
-
-/// A scalar that can represent any JSON value.
-#[Scalar(internal, name = "JSON")]
-impl<T: DeserializeOwned + Serialize + Send + Sync> ScalarType for Json<T> {
-    fn parse(value: Value) -> InputValueResult<Self> {
-        Ok(serde_json::from_value(value.into_json()?)?)
-    }
-
-    fn to_value(&self) -> Value {
-        serde_json::to_value(&self.0)
-            .ok()
-            .and_then(|json| Value::from_json(json).ok())
-            .unwrap_or_else(|| Value::Null)
     }
 }
 

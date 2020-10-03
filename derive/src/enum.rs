@@ -22,10 +22,12 @@ pub fn generate(enum_args: &args::Enum) -> GeneratorResult<TokenStream> {
         .unwrap_or_else(|| quote! {None});
 
     let mut enum_items = Vec::new();
-    let mut items = Vec::new();
+    let mut de_variant_arms = proc_macro2::TokenStream::new();
+    let mut ser_variant_arms = proc_macro2::TokenStream::new();
+    let mut variants = proc_macro2::TokenStream::new();
     let mut schema_enum_items = Vec::new();
 
-    for variant in e {
+    for (i, variant) in e.iter().enumerate() {
         if !variant.fields.is_empty() {
             return Err(Error::new_spanned(
                 &variant.ident,
@@ -53,12 +55,13 @@ pub fn generate(enum_args: &args::Enum) -> GeneratorResult<TokenStream> {
             .unwrap_or_else(|| quote! {None});
 
         enum_items.push(item_ident);
-        items.push(quote! {
-            #crate_name::resolver_utils::EnumItem {
-                name: #gql_item_name,
-                value: #ident::#item_ident,
-            }
+        de_variant_arms.extend(quote! {
+            #gql_item_name => #ident::#item_ident,
         });
+        ser_variant_arms.extend(quote! {
+            #ident::#item_ident => (#i, #gql_item_name),
+        });
+        variants.extend(quote!(#gql_item_name,));
         schema_enum_items.push(quote! {
             enum_items.insert(#gql_item_name, #crate_name::registry::MetaEnumValue {
                 name: #gql_item_name,
@@ -110,9 +113,90 @@ pub fn generate(enum_args: &args::Enum) -> GeneratorResult<TokenStream> {
 
     let expanded = quote! {
         #[allow(clippy::all, clippy::pedantic)]
-        impl #crate_name::resolver_utils::EnumType for #ident {
-            fn items() -> &'static [#crate_name::resolver_utils::EnumItem<#ident>] {
-                &[#(#items),*]
+        impl<'de> #crate_name::serde::Deserialize<'de> for #ident {
+            fn deserialize<D>(deserializer: D) -> ::std::result::Result<
+                Self,
+                <D as #crate_name::serde::Deserializer<'de>>::Error
+            >
+            where
+                D: #crate_name::serde::Deserializer<'de>,
+            {
+                const VARIANTS: &[&str] = [#variants];
+
+                struct DeserializeVariant(#ident);
+                impl<'de> #crate_name::serde::Deserialize<'de> for DeserializeVariant {
+                    fn deserialize<D>(deserializer: D) -> ::std::result::Result<
+                        Self,
+                        <D as #crate_name::serde::Deserializer<'de>>::Error
+                    >
+                    where
+                        D: #crate_name::serde::Deserializer<'de>,
+                    {
+                        struct VariantVisitor;
+                        impl<'de> #crate_name::serde::de::Visitor<'de> for VariantVisitor {
+                            type Value = #ident;
+
+                            fn expecting(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                                f.write_str("variant identifier")
+                            }
+                            fn visit_str<E: #crate_name::serde::de::Error>(
+                                self,
+                                value: &::std::primitive::str
+                            ) -> ::std::result::Result<Self::Value, E> {
+                                ::std::result::Result::Ok(match value {
+                                    #de_variant_arms
+                                    _ => return ::std::result::Result::Err(
+                                        <E as #crate_name::serde::de::Error>::unknown_variant(value, VARIANTS)
+                                    ),
+                                })
+                            }
+                        }
+                        #crate_name::serde::Deserializer::deserialize_identifier(
+                            deserializer,
+                            VariantVisitor
+                        )
+                    }
+                }
+
+                struct Visitor;
+                impl<'de> #crate_name::serde::de::Visitor<'de> for Visitor {
+                    type Value = #ident;
+
+                    fn expecting(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                        f.write_str(::std::concat!("enum \"", #gql_typename, "\""))
+                    }
+                    fn visit_enum<A>(self, data: A) -> ::std::result::Result<Self::Value, A::Error>
+                    where
+                        A: #crate_name::serde::de::EnumAccess<'de>,
+                    {
+                        let (variant, access) = #crate_name::serde::de::EnumAccess::variant(data)?;
+                        #crate_name::serde::de::VariantAcesss::unit_variant(access)?;
+                        ::std::result::Result::Ok(variant)
+                    }
+                }
+
+                #crate_name::serde::Deserializer::deserialize_enum(
+                    deserializer,
+                    #gql_typename,
+                    VARIANTS,
+                    Visitor,
+                )
+            }
+        }
+
+        #[allow(clippy::all, clippy::pedantic)]
+        impl #crate_name::serde::Serialize for #ident {
+            fn serialize<S>(&self, serializer: S) -> ::std::result::Result<S::Ok, S::Error>
+            where
+                S: #crate_name::serde::Serializer,
+            {
+                let (i, name): (u32, &'static str) = match *self { #ser_variant_arms };
+                #crate_name::serde::Serializer::serialize_unit_variant(
+                    serializer,
+                    #gql_typename,
+                    i,
+                    name,
+                )
             }
         }
 
@@ -137,21 +221,16 @@ pub fn generate(enum_args: &args::Enum) -> GeneratorResult<TokenStream> {
             }
         }
 
-        #[allow(clippy::all, clippy::pedantic)]
-        impl #crate_name::InputValueType for #ident {
-            fn parse(value: Option<#crate_name::Value>) -> #crate_name::InputValueResult<Self> {
-                #crate_name::resolver_utils::parse_enum(value.unwrap_or_default())
-            }
-
-            fn to_value(&self) -> #crate_name::Value {
-                #crate_name::resolver_utils::enum_value(*self)
-            }
-        }
+        impl #crate_name::InputValueType for #ident {}
 
         #[#crate_name::async_trait::async_trait]
         impl #crate_name::OutputValueType for #ident {
-            async fn resolve(&self, _: &#crate_name::ContextSelectionSet<'_>, _field: &#crate_name::Positioned<#crate_name::parser::types::Field>) -> #crate_name::ServerResult<#crate_name::serde_json::Value> {
-                Ok(#crate_name::resolver_utils::enum_value(*self).into_json().unwrap())
+            async fn resolve(
+                &self,
+                _: &#crate_name::ContextSelectionSet<'_>,
+                _field: &#crate_name::Positioned<#crate_name::parser::types::Field>,
+            ) -> #crate_name::ServerResult<#crate_name::serde_json::Value> {
+                ::std::result::Result::Ok(#crate_name::serde_json::to_value(self).unwrap())
             }
         }
 

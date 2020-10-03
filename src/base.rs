@@ -1,10 +1,11 @@
 use crate::parser::types::Field;
 use crate::registry::Registry;
 use crate::{
-    registry, ContainerType, ContextSelectionSet, InputValueResult, Positioned, Result,
-    ServerResult, Value,
+    registry, ContainerType, ContextSelectionSet, Positioned, Result,
+    ServerResult,
 };
 use std::borrow::Cow;
+use serde::de::DeserializeOwned;
 
 /// Represents a GraphQL type
 ///
@@ -30,13 +31,7 @@ pub trait Type {
 }
 
 /// Represents a GraphQL input value
-pub trait InputValueType: Type + Sized {
-    /// Parse from `Value`. None represents undefined.
-    fn parse(value: Option<Value>) -> InputValueResult<Self>;
-
-    /// Convert to a `Value` for introspection.
-    fn to_value(&self) -> Value;
-}
+pub trait InputValueType: Type + DeserializeOwned {}
 
 /// Represents a GraphQL output value
 #[async_trait::async_trait]

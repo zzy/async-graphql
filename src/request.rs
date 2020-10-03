@@ -1,10 +1,8 @@
-use crate::parser::types::UploadValue;
-use crate::{Data, ParseRequestError, Value, Variables};
+use crate::{Data, ParseRequestError, Variables};
 use serde::{Deserialize, Deserializer};
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
-use std::fs::File;
 
 /// GraphQL request.
 ///
@@ -71,30 +69,6 @@ impl Request {
     pub fn data<D: Any + Send + Sync>(mut self, data: D) -> Self {
         self.data.insert(data);
         self
-    }
-
-    /// Set a variable to an upload value.
-    ///
-    /// `var_path` is a dot-separated path to the item that begins with `variables`, for example
-    /// `variables.files.2.content` is equivalent to the Rust code
-    /// `request.variables["files"][2]["content"]`. If no variable exists at the path this function
-    /// won't do anything.
-    pub fn set_upload(
-        &mut self,
-        var_path: &str,
-        filename: String,
-        content_type: Option<String>,
-        content: File,
-    ) {
-        let variable = match self.variables.variable_path(var_path) {
-            Some(variable) => variable,
-            None => return,
-        };
-        *variable = Value::Upload(UploadValue {
-            filename,
-            content_type,
-            content,
-        });
     }
 }
 

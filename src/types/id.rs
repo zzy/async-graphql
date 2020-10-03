@@ -1,15 +1,18 @@
-use crate::{InputValueError, InputValueResult, Scalar, ScalarType, Value};
+use crate::Scalar;
 #[cfg(feature = "bson")]
 use bson::oid::{self, ObjectId};
 use serde::{Deserialize, Serialize};
+use serde::de::{self, Deserializer, Visitor};
+use std::fmt::{self, Formatter};
 use std::convert::TryFrom;
 use std::num::ParseIntError;
 use std::ops::{Deref, DerefMut};
 
-/// ID scalar
+/// ID scalar.
 ///
-/// The input is a `&str`, `String`, `usize` or `uuid::UUID`, and the output is a string.
-#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+/// It deserializes from strings and integers, and the output is a string.
+#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Serialize, Scalar)]
+#[graphql(internal)]
 #[serde(transparent)]
 pub struct ID(pub String);
 
@@ -79,25 +82,34 @@ impl PartialEq<&str> for ID {
     }
 }
 
-#[Scalar(internal)]
-impl ScalarType for ID {
-    fn parse(value: Value) -> InputValueResult<Self> {
-        match value {
-            Value::Number(n) if n.is_i64() => Ok(ID(n.to_string())),
-            Value::String(s) => Ok(ID(s)),
-            _ => Err(InputValueError::expected_type(value)),
+impl<'de> Deserialize<'de> for ID {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct IDVisitor;
+        impl<'de> Visitor<'de> for IDVisitor {
+            type Value = ID;
+            fn expecting(&self, f: &mut Formatter) -> fmt::Result {
+                f.write_str("a GraphQL ID")
+            }
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(ID(v.to_string()))
+            }
+            fn visit_i128<E: de::Error>(self, v: i128) -> Result<Self::Value, E> {
+                Ok(ID(v.to_string()))
+            }
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(ID(v.to_string()))
+            }
+            fn visit_u128<E: de::Error>(self, v: u128) -> Result<Self::Value, E> {
+                Ok(ID(v.to_string()))
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(ID(v.to_owned()))
+            }
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+                Ok(ID(v))
+            }
         }
-    }
 
-    fn is_valid(value: &Value) -> bool {
-        match value {
-            Value::Number(n) if n.is_i64() => true,
-            Value::String(_) => true,
-            _ => false,
-        }
-    }
-
-    fn to_value(&self) -> Value {
-        Value::String(self.0.clone())
+        deserializer.deserialize_string(IDVisitor)
     }
 }

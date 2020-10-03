@@ -7,14 +7,13 @@
 //! This follows the [June 2018 edition of the GraphQL spec](https://spec.graphql.org/June2018/).
 
 use crate::pos::Positioned;
-use serde::de::{Deserializer, Error as _, Unexpected};
+use serde::de::{self, Deserializer, Error as _, Unexpected, Visitor, IntoDeserializer};
 use serde::ser::{Error as _, Serializer};
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{hash_map, BTreeMap, HashMap};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display, Formatter, Write};
-use std::fs::File;
 use std::ops::Deref;
 
 pub use executable::*;
@@ -110,8 +109,8 @@ impl Display for BaseType {
 
 /// A resolved GraphQL value, for example `1` or `"Hello World!"`.
 ///
-/// It can be serialized and deserialized. Enums will be converted to strings. Attempting to
-/// serialize `Upload` will fail, and `Enum` and `Upload` cannot be deserialized.
+/// It can be serialized and deserialized. Enums will be converted to strings. `Enum` cannot be
+/// deserialized.
 ///
 /// [Reference](https://spec.graphql.org/June2018/#Value).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,9 +131,6 @@ pub enum ConstValue {
     List(Vec<ConstValue>),
     /// An object. This is a map of keys to values.
     Object(BTreeMap<Name, ConstValue>),
-    /// An uploaded file.
-    #[serde(serialize_with = "fail_serialize_upload", skip_deserializing)]
-    Upload(UploadValue),
 }
 
 impl ConstValue {
@@ -155,7 +151,6 @@ impl ConstValue {
                     .map(|(key, value)| (key, value.into_value()))
                     .collect(),
             ),
-            Self::Upload(upload) => Value::Upload(upload),
         }
     }
 
@@ -191,7 +186,7 @@ impl Display for ConstValue {
             Self::String(val) => write_quoted(val, f),
             Self::Boolean(true) => f.write_str("true"),
             Self::Boolean(false) => f.write_str("false"),
-            Self::Null | Self::Upload(_) => f.write_str("null"),
+            Self::Null => f.write_str("null"),
             Self::Enum(name) => f.write_str(name),
             Self::List(items) => write_list(items, f),
             Self::Object(map) => write_object(map, f),
@@ -212,12 +207,45 @@ impl TryFrom<ConstValue> for serde_json::Value {
     }
 }
 
+impl<'de> Deserializer<'de> for ConstValue {
+    type Error = de::value::Error;
+    fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        match self {
+            Self::Null => visitor.visit_unit(),
+            Self::Number(n) => n.deserialize_any(visitor).map_err(de::Error::custom),
+            Self::String(s) => visitor.visit_string(s),
+            Self::Boolean(b) => visitor.visit_bool(b),
+            Self::Enum(v) => visitor.visit_enum(v.into_deserializer()),
+            Self::List(a) => a.into_deserializer().deserialize_any(visitor),
+            Self::Object(o) => o.into_deserializer().deserialize_any(visitor),
+        }
+    }
+
+    fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        match self {
+            Self::Null => visitor.visit_none(),
+            other => visitor.visit_some(other),
+        }
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+        bytes byte_buf unit unit_struct newtype_struct seq tuple
+        tuple_struct map struct enum identifier ignored_any
+    }
+}
+impl<'de> IntoDeserializer<'de> for ConstValue {
+    type Deserializer = Self;
+    fn into_deserializer(self) -> Self::Deserializer {
+        self
+    }
+}
+
 /// A GraphQL value, for example `1`, `$name` or `"Hello World!"`. This is
 /// [`ConstValue`](enum.ConstValue.html) with variables.
 ///
 /// It can be serialized and deserialized. Enums will be converted to strings. Attempting to
-/// serialize `Upload` or `Variable` will fail, and `Enum`, `Upload` and `Variable` cannot be
-/// deserialized.
+/// serialize `Variable` will fail, and `Enum` and `Variable` cannot be deserialized.
 ///
 /// [Reference](https://spec.graphql.org/June2018/#Value).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -241,9 +269,6 @@ pub enum Value {
     List(Vec<Value>),
     /// An object. This is a map of keys to values.
     Object(BTreeMap<Name, Value>),
-    /// An uploaded file.
-    #[serde(serialize_with = "fail_serialize_upload", skip_deserializing)]
-    Upload(UploadValue),
 }
 
 impl Value {
@@ -277,7 +302,6 @@ impl Value {
                     .map(|(key, value)| Ok((key, value.into_const_with_mut(f)?)))
                     .collect::<Result<_, _>>()?,
             ),
-            Self::Upload(upload) => ConstValue::Upload(upload),
         })
     }
 
@@ -322,7 +346,7 @@ impl Display for Value {
             Self::String(val) => write_quoted(val, f),
             Self::Boolean(true) => f.write_str("true"),
             Self::Boolean(false) => f.write_str("false"),
-            Self::Null | Self::Upload(_) => f.write_str("null"),
+            Self::Null => f.write_str("null"),
             Self::Enum(name) => f.write_str(name),
             Self::List(items) => write_list(items, f),
             Self::Object(map) => write_object(map, f),
@@ -351,9 +375,6 @@ impl TryFrom<Value> for serde_json::Value {
 
 fn fail_serialize_variable<S: Serializer>(_: &str, _: S) -> Result<S::Ok, S::Error> {
     Err(S::Error::custom("cannot serialize variable"))
-}
-fn fail_serialize_upload<S: Serializer>(_: &UploadValue, _: S) -> Result<S::Ok, S::Error> {
-    Err(S::Error::custom("cannot serialize uploaded file"))
 }
 
 fn write_quoted(s: &str, f: &mut Formatter<'_>) -> fmt::Result {
@@ -389,51 +410,6 @@ fn write_object<K: Display, V: Display>(
     }
     f.write_char('}')
 }
-
-/// A file upload value.
-pub struct UploadValue {
-    /// The name of the file.
-    pub filename: String,
-    /// The content type of the file.
-    pub content_type: Option<String>,
-    /// The file data.
-    pub content: File,
-}
-
-impl UploadValue {
-    /// Attempt to clone the upload value. This type's `Clone` implementation simply calls this and
-    /// panics on failure.
-    ///
-    /// # Errors
-    ///
-    /// Fails if cloning the inner `File` fails.
-    pub fn try_clone(&self) -> std::io::Result<Self> {
-        Ok(Self {
-            filename: self.filename.clone(),
-            content_type: self.content_type.clone(),
-            content: self.content.try_clone()?,
-        })
-    }
-}
-
-impl Clone for UploadValue {
-    fn clone(&self) -> Self {
-        self.try_clone().unwrap()
-    }
-}
-
-impl fmt::Debug for UploadValue {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Upload({})", self.filename)
-    }
-}
-
-impl PartialEq for UploadValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.filename == other.filename
-    }
-}
-impl Eq for UploadValue {}
 
 /// A const GraphQL directive, such as `@deprecated(reason: "Use the other field)`. This differs
 /// from [`Directive`](struct.Directive.html) in that it uses [`ConstValue`](enum.ConstValue.html)
@@ -633,6 +609,13 @@ impl<'de> Deserialize<'de> for Name {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Self::new(String::deserialize(deserializer)?)
             .map_err(|s| D::Error::invalid_value(Unexpected::Str(&s), &"a GraphQL name"))
+    }
+}
+
+impl<'de, E: de::Error> IntoDeserializer<'de, E> for Name {
+    type Deserializer = de::value::StringDeserializer<E>;
+    fn into_deserializer(self) -> Self::Deserializer {
+        self.into_string().into_deserializer()
     }
 }
 

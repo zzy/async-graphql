@@ -115,15 +115,13 @@ pub fn Subscription(args: TokenStream, input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_attribute]
-#[allow(non_snake_case)]
-pub fn Scalar(args: TokenStream, input: TokenStream) -> TokenStream {
-    let scalar_args = match args::Scalar::from_list(&parse_macro_input!(args as AttributeArgs)) {
+#[proc_macro_derive(Scalar, attributes(graphql, item))]
+pub fn derive_scalar(input: TokenStream) -> TokenStream {
+    let scalar_args = match args::Scalar::from_derive_input(&parse_macro_input!(input as DeriveInput)) {
         Ok(scalar_args) => scalar_args,
         Err(err) => return TokenStream::from(err.write_errors()),
     };
-    let mut item_impl = parse_macro_input!(input as ItemImpl);
-    match scalar::generate(&scalar_args, &mut item_impl) {
+    match scalar::generate(&scalar_args) {
         Ok(expanded) => expanded,
         Err(err) => err.write_errors().into(),
     }

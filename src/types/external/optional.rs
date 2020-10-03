@@ -1,7 +1,7 @@
 use crate::parser::types::Field;
 use crate::{
-    registry, ContextSelectionSet, InputValueError, InputValueResult, InputValueType,
-    OutputValueType, Positioned, ServerResult, Type, Value,
+    registry, ContextSelectionSet, InputValueType,
+    OutputValueType, Positioned, ServerResult, Type,
 };
 use std::borrow::Cow;
 
@@ -20,23 +20,7 @@ impl<T: Type> Type for Option<T> {
     }
 }
 
-impl<T: InputValueType> InputValueType for Option<T> {
-    fn parse(value: Option<Value>) -> InputValueResult<Self> {
-        match value.unwrap_or_default() {
-            Value::Null => Ok(None),
-            value => Ok(Some(
-                T::parse(Some(value)).map_err(InputValueError::propogate)?,
-            )),
-        }
-    }
-
-    fn to_value(&self) -> Value {
-        match self {
-            Some(value) => value.to_value(),
-            None => Value::Null,
-        }
-    }
-}
+impl<T: InputValueType> InputValueType for Option<T> {}
 
 #[async_trait::async_trait]
 impl<T: OutputValueType + Sync> OutputValueType for Option<T> {

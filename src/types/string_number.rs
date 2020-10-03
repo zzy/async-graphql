@@ -1,41 +1,14 @@
-use crate::{InputValueError, InputValueResult, Scalar, ScalarType, Value};
+use crate::{Scalar, ScalarType};
 use num_traits::Num;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
 /// A numeric value represented by a string.
-#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Serialize, Deserialize, Scalar)]
+#[graphql(internal)]
 #[serde(transparent)]
 #[cfg_attr(feature = "nightly", doc(cfg(feature = "string_number")))]
 pub struct StringNumber<T: Num + Display>(pub T);
-
-#[Scalar(internal)]
-impl<T: Num + Display + Send + Sync> ScalarType for StringNumber<T>
-where
-    <T as Num>::FromStrRadixErr: Display,
-{
-    fn parse(value: Value) -> InputValueResult<Self> {
-        match value {
-            Value::String(s) => {
-                let n = T::from_str_radix(&s, 10)
-                    .map_err(|err| InputValueError::custom(err.to_string()))?;
-                Ok(StringNumber(n))
-            }
-            _ => Err(InputValueError::expected_type(value)),
-        }
-    }
-
-    fn is_valid(value: &Value) -> bool {
-        match value {
-            Value::String(_) => true,
-            _ => false,
-        }
-    }
-
-    fn to_value(&self) -> Value {
-        Value::String(self.0.to_string())
-    }
-}
 
 #[cfg(test)]
 mod test {

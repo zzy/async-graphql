@@ -1,4 +1,4 @@
-use crate::{parser, InputValueType, Pos, Value};
+use crate::{parser, Pos};
 use serde::Serialize;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::marker::PhantomData;
@@ -85,66 +85,6 @@ pub enum PathSegment {
 
 /// Alias for `Result<T, ServerError>`.
 pub type ServerResult<T> = std::result::Result<T, ServerError>;
-
-/// An error parsing an input value.
-///
-/// This type is generic over T as it uses T's type name when converting to a regular error.
-#[derive(Debug)]
-pub struct InputValueError<T> {
-    message: String,
-    phantom: PhantomData<T>,
-}
-
-impl<T: InputValueType> InputValueError<T> {
-    fn new(message: String) -> Self {
-        Self {
-            message,
-            phantom: PhantomData,
-        }
-    }
-
-    /// The expected input type did not match the actual input type.
-    #[must_use]
-    pub fn expected_type(actual: Value) -> Self {
-        Self::new(format!(
-            r#"Expected input type "{}", found {}."#,
-            T::type_name(),
-            actual
-        ))
-    }
-
-    /// A custom error message.
-    ///
-    /// Any type that implements `Display` is automatically converted to this if you use the `?`
-    /// operator.
-    #[must_use]
-    pub fn custom(msg: impl Display) -> Self {
-        Self::new(format!(r#"Failed to parse "{}": {}"#, T::type_name(), msg))
-    }
-
-    /// Propogate the error message to a different type.
-    pub fn propogate<U: InputValueType>(self) -> InputValueError<U> {
-        InputValueError::new(format!(
-            r#"{} (occurred while parsing "{}")"#,
-            self.message,
-            U::type_name()
-        ))
-    }
-
-    /// Convert the error into a server error.
-    pub fn into_server_error(self) -> ServerError {
-        ServerError::new(self.message)
-    }
-}
-
-impl<T: InputValueType, E: Display> From<E> for InputValueError<T> {
-    fn from(error: E) -> Self {
-        Self::custom(error)
-    }
-}
-
-/// An error parsing a value of type `T`.
-pub type InputValueResult<T> = Result<T, InputValueError<T>>;
 
 /// An error with a message and optional extensions.
 #[derive(Debug, Clone, Serialize)]

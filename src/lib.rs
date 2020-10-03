@@ -59,7 +59,6 @@
 //! - `log`: Enable the [logger extension](extensions/struct.Logger.html).
 //! - `tracing`: Enable the [tracing extension](extensions/struct.Tracing.html).
 //! - `multipart`: Support [sending files over HTTP multipart](http/fn.receive_body.html).
-//! - `unblock`: Support [asynchronous reader for Upload](types/struct.Upload.html)
 //! - `bson`: Integrate with the [`bson` crate](https://crates.io/crates/bson).
 //! - `chrono`: Integrate with the [`chrono` crate](https://crates.io/crates/chrono).
 //! - `chrono-tz`: Integrate with the [`chrono-tz` crate](https://crates.io/crates/chrono-tz).
@@ -148,7 +147,11 @@ pub use futures;
 #[doc(hidden)]
 pub use indexmap;
 #[doc(hidden)]
+pub use serde;
+#[doc(hidden)]
 pub use serde_json;
+#[doc(hidden)]
+pub use serde_value;
 #[doc(hidden)]
 pub use static_assertions;
 #[doc(hidden)]
@@ -162,14 +165,14 @@ pub use context::{
     Context, ContextBase, Data, QueryEnv, QueryPathNode, QueryPathSegment, ResolveId, Variables,
 };
 pub use error::{
-    Error, ErrorExtensions, InputValueError, InputValueResult, ParseRequestError, PathSegment,
+    Error, ErrorExtensions, ParseRequestError, PathSegment,
     Result, ResultExt, ServerError, ServerResult,
 };
 pub use look_ahead::Lookahead;
-pub use parser::types::{ConstValue as Value, Number};
+pub use parser::types::Number;
 pub use registry::CacheControl;
 pub use request::{BatchRequest, Request};
-pub use resolver_utils::{ContainerType, EnumType, ScalarType};
+pub use resolver_utils::{ContainerType, ScalarType};
 pub use response::{BatchResponse, Response};
 pub use schema::{Schema, SchemaBuilder, SchemaEnv};
 pub use validation::ValidationMode;

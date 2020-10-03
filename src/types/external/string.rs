@@ -1,49 +1,26 @@
 use crate::parser::types::Field;
-use crate::{
-    registry, ContextSelectionSet, InputValueError, InputValueResult, OutputValueType, Positioned,
-    Scalar, ScalarType, ServerResult, Type, Value,
-};
+use crate::{Type, OutputValueType, ContextSelectionSet, Positioned, ServerResult};
+use crate::registry::Registry;
 use std::borrow::Cow;
-
-/// The `String` scalar type represents textual data, represented as UTF-8 character sequences. The String type is most often used by GraphQL to represent free-form human-readable text.
-#[Scalar(internal)]
-impl ScalarType for String {
-    fn parse(value: Value) -> InputValueResult<Self> {
-        match value {
-            Value::String(s) => Ok(s),
-            _ => Err(InputValueError::expected_type(value)),
-        }
-    }
-
-    fn is_valid(value: &Value) -> bool {
-        match value {
-            Value::String(_) => true,
-            _ => false,
-        }
-    }
-
-    fn to_value(&self) -> Value {
-        Value::String(self.clone())
-    }
-}
+use async_trait::async_trait;
 
 impl<'a> Type for &'a str {
     fn type_name() -> Cow<'static, str> {
-        Cow::Borrowed("String")
+        String::type_name()
     }
-
-    fn create_type_info(registry: &mut registry::Registry) -> String {
-        <String as Type>::create_type_info(registry)
+    
+    fn create_type_info(registry: &mut Registry) -> String {
+        String::create_type_info(registry)
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl<'a> OutputValueType for &'a str {
     async fn resolve(
         &self,
-        _: &ContextSelectionSet<'_>,
-        _field: &Positioned<Field>,
+        ctx: &ContextSelectionSet<'_>,
+        _field: &Positioned<Field>
     ) -> ServerResult<serde_json::Value> {
-        Ok((*self).into())
+        Ok(serde_json::Value::String(self.to_owned()))
     }
 }

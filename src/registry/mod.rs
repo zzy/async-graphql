@@ -116,7 +116,6 @@ pub enum MetaType {
     Scalar {
         name: String,
         description: Option<&'static str>,
-        is_valid: fn(value: &Value) -> bool,
     },
     Object {
         name: String,

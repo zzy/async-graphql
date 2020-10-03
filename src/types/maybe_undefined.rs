@@ -1,4 +1,4 @@
-use crate::{registry, InputValueError, InputValueResult, InputValueType, Type, Value};
+use crate::{registry, InputValueType, Type};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::borrow::Cow;
 
@@ -60,34 +60,31 @@ impl<T> Default for MaybeUndefined<T> {
 }
 
 impl<T> MaybeUndefined<T> {
-    /// Returns true if the MaybeUndefined<T> is undefined.
+    /// Create a `MaybeUndefined` from a defined option.
+    #[inline]
+    pub fn from_defined(defined: Option<T>) -> Self {
+        match defined {
+            Some(value) => Self::Value(value),
+            None => Self::Null,
+        }
+    }
+
+    /// Returns true if the `MaybeUndefined<T>` is undefined.
     #[inline]
     pub fn is_undefined(&self) -> bool {
-        if let MaybeUndefined::Undefined = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, MaybeUndefined::Undefined)
     }
 
-    /// Returns true if the MaybeUndefined<T> is null.
+    /// Returns true if the `MaybeUndefined<T>` is null.
     #[inline]
     pub fn is_null(&self) -> bool {
-        if let MaybeUndefined::Null = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, MaybeUndefined::Null)
     }
 
-    /// Returns true if the MaybeUndefined<T> is value.
+    /// Returns true if the `MaybeUndefined<T>` contains a value.
     #[inline]
     pub fn is_value(&self) -> bool {
-        if let MaybeUndefined::Value(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, MaybeUndefined::Value(_))
     }
 
     /// Borrow the value, returns `None` if the value is `undefined` or `null`, otherwise returns `Some(T)`.
@@ -100,6 +97,7 @@ impl<T> MaybeUndefined<T> {
     }
 
     /// Convert MaybeUndefined<T> to Option<T>.
+    // TODO: Rename this to avoid confusion with Option::take and std::mem::take
     #[inline]
     pub fn take(self) -> Option<T> {
         match self {
@@ -124,27 +122,10 @@ impl<T: Type> Type for MaybeUndefined<T> {
     }
 }
 
-impl<T: InputValueType> InputValueType for MaybeUndefined<T> {
-    fn parse(value: Option<Value>) -> InputValueResult<Self> {
-        match value {
-            None => Ok(MaybeUndefined::Undefined),
-            Some(Value::Null) => Ok(MaybeUndefined::Null),
-            Some(value) => Ok(MaybeUndefined::Value(
-                T::parse(Some(value)).map_err(InputValueError::propogate)?,
-            )),
-        }
-    }
-
-    fn to_value(&self) -> Value {
-        match self {
-            MaybeUndefined::Value(value) => value.to_value(),
-            _ => Value::Null,
-        }
-    }
-}
+impl<T: InputValueType> InputValueType for MaybeUndefined<T> {}
 
 impl<T: Serialize> Serialize for MaybeUndefined<T> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             MaybeUndefined::Value(value) => value.serialize(serializer),
             _ => serializer.serialize_none(),
@@ -152,18 +133,9 @@ impl<T: Serialize> Serialize for MaybeUndefined<T> {
     }
 }
 
-impl<'de, T> Deserialize<'de> for MaybeUndefined<T>
-where
-    T: Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<MaybeUndefined<T>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Option::<T>::deserialize(deserializer).map(|value| match value {
-            Some(value) => MaybeUndefined::Value(value),
-            None => MaybeUndefined::Null,
-        })
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for MaybeUndefined<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::from_defined(<_>::deserialize(deserializer)?))
     }
 }
 

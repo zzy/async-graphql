@@ -271,10 +271,16 @@ pub struct Interface {
     pub extends: bool,
 }
 
-#[derive(FromMeta, Default)]
-#[darling(default)]
+#[derive(FromDeriveInput)]
+#[darling(attributes(graphql), forward_attrs(doc))]
 pub struct Scalar {
+    pub ident: Ident,
+    pub generics: Generics,
+    pub attrs: Vec<Attribute>,
+
+    #[darling(default)]
     pub internal: bool,
+    #[darling(default)]
     pub name: Option<String>,
 }
 
