@@ -1,4 +1,4 @@
-use crate::args;
+use crate::args::{self, CombineValidator, Validator};
 use darling::FromMeta;
 use proc_macro2::{Span, TokenStream, TokenTree};
 use proc_macro_crate::crate_name;
@@ -35,86 +35,82 @@ pub fn get_crate_name(internal: bool) -> TokenStream {
     }
 }
 
-fn generate_nested_validator(
+pub fn generate_validator(
     crate_name: &TokenStream,
-    nested_meta: &NestedMeta,
+    validator: &Validator,
 ) -> GeneratorResult<TokenStream> {
-    let mut params = Vec::new();
-    match nested_meta {
-        NestedMeta::Meta(Meta::List(ls)) => {
-            if ls.path.is_ident("and") {
-                let mut validators = Vec::new();
-                for nested_meta in &ls.nested {
-                    validators.push(generate_nested_validator(crate_name, nested_meta)?);
-                }
-                Ok(validators
-                    .into_iter()
-                    .fold(None, |acc, item| match acc {
-                        Some(prev) => Some(quote! { #crate_name::validators::InputValueValidatorExt::and(#prev, #item) }),
-                        None => Some(item),
-                    })
-                    .unwrap())
-            } else if ls.path.is_ident("or") {
-                let mut validators = Vec::new();
-                for nested_meta in &ls.nested {
-                    validators.push(generate_nested_validator(crate_name, nested_meta)?);
-                }
-                Ok(validators
-                    .into_iter()
-                    .fold(None, |acc, item| match acc {
-                        Some(prev) => Some(quote! { #crate_name::validators::InputValueValidatorExt::or(#prev, #item) }),
-                        None => Some(item),
-                    })
-                    .unwrap())
-            } else {
-                let ty = &ls.path;
-                for item in &ls.nested {
-                    if let NestedMeta::Meta(Meta::NameValue(nv)) = item {
-                        let name = &nv.path;
-                        if let Lit::Str(value) = &nv.lit {
-                            let expr = syn::parse_str::<Expr>(&value.value())?;
-                            params.push(quote! { #name: (#expr).into() });
-                        } else {
-                            return Err(Error::new_spanned(
-                                &nv.lit,
-                                "Value must be string literal",
-                            )
-                            .into());
-                        }
-                    } else {
-                        return Err(Error::new_spanned(
-                            nested_meta,
-                            "Invalid property for validator",
-                        )
-                        .into());
-                    }
-                }
-                Ok(quote! { #ty { #(#params),* } })
-            }
-        }
-        NestedMeta::Meta(Meta::Path(ty)) => Ok(quote! { #ty {} }),
-        NestedMeta::Meta(Meta::NameValue(_)) | NestedMeta::Lit(_) => {
-            Err(Error::new_spanned(nested_meta, "Invalid validator").into())
-        }
-    }
-}
+    Ok(match validator {
+        Validator::Combine {
+            combination,
+            combination_span,
+            validators,
+        } => {
+            let combination = Ident::new(
+                match combination {
+                    CombineValidator::And => "And",
+                    CombineValidator::Or => "Or",
+                },
+                *combination_span,
+            );
 
-pub fn generate_validator(crate_name: &TokenStream, args: &Meta) -> GeneratorResult<TokenStream> {
-    match args {
-        Meta::List(args) => {
-            if args.nested.len() > 1 {
-                return Err(Error::new_spanned(args, "Only one validator can be defined. You can connect combine validators with `and` or `or`").into());
-            }
-            if args.nested.is_empty() {
-                return Err(
-                    Error::new_spanned(args, "At least one validator must be defined").into(),
-                );
-            }
-            let validator = generate_nested_validator(crate_name, &args.nested[0])?;
-            Ok(quote! { ::std::sync::Arc::new(#validator) })
+            validators
+                .iter()
+                .map(|validator| generate_validator(crate_name, validator))
+                .try_fold(None, |acc, item| -> GeneratorResult<_> {
+                    let item = item?;
+                    Ok(Some(match acc {
+                        Some(prev) => quote!(#crate_name::validators::#combination(#prev, #item)),
+                        None => item,
+                    }))
+                })?
+                .ok_or_else(|| {
+                    syn::Error::new(*combination_span, "at least one validator is required")
+                })?
         }
-        _ => Err(Error::new_spanned(args, "Invalid validator").into()),
-    }
+        Validator::Single(single) => {
+            let path = &single.path;
+
+            let constructor = if single.constructor_args.is_empty() {
+                quote!(<#path as ::std::default::Default>::default())
+            } else {
+                let constructor_args: TokenStream = single
+                    .constructor_args
+                    .iter()
+                    .map(|arg| {
+                        Ok({
+                            let arg: TokenStream = arg.parse()?;
+                            quote!(#arg,)
+                        })
+                    })
+                    .collect::<syn::Result<_>>()?;
+
+                quote!(#path::new(#constructor_args))
+            };
+
+            let methods: TokenStream = single
+                .methods
+                .iter()
+                .map(|method| {
+                    Ok({
+                        let name = &method.name;
+                        let args: TokenStream = method
+                            .args
+                            .iter()
+                            .map(|arg| {
+                                Ok({
+                                    let arg: TokenStream = arg.parse()?;
+                                    quote!(#arg,)
+                                })
+                            })
+                            .collect::<syn::Result<_>>()?;
+                        quote!(.#name(#args))
+                    })
+                })
+                .collect::<syn::Result<_>>()?;
+
+            quote!(#constructor #methods)
+        }
+    })
 }
 
 pub fn generate_guards(

@@ -1,7 +1,8 @@
 use darling::ast::{Data, Fields};
 use darling::util::Ignored;
 use darling::{FromDeriveInput, FromField, FromMeta, FromVariant};
-use syn::{Attribute, Generics, Ident, Lit, LitStr, Meta, Type, Visibility};
+use syn::{Attribute, Generics, Ident, Lit, LitStr, Meta, NestedMeta, Path, Type, Visibility};
+use proc_macro2::Span;
 
 #[derive(FromMeta)]
 #[darling(default)]
@@ -98,7 +99,7 @@ pub struct Argument {
     pub desc: Option<String>,
     pub default: Option<DefaultValue>,
     pub default_with: Option<LitStr>,
-    pub validator: Option<Meta>,
+    pub validator: Option<Validator>,
     pub key: bool, // for entity
 }
 
@@ -194,7 +195,7 @@ pub struct InputObjectField {
     #[darling(default)]
     pub default_with: Option<LitStr>,
     #[darling(default)]
-    pub validator: Option<Meta>,
+    pub validator: Option<Validator>,
     #[darling(default)]
     pub flatten: bool,
 }
@@ -298,7 +299,7 @@ pub struct SubscriptionFieldArgument {
     pub desc: Option<String>,
     pub default: Option<DefaultValue>,
     pub default_with: Option<LitStr>,
-    pub validator: Option<Meta>,
+    pub validator: Option<Validator>,
 }
 
 #[derive(FromMeta, Default)]
@@ -359,4 +360,134 @@ pub struct MergedSubscription {
     pub internal: bool,
     #[darling(default)]
     pub name: Option<String>,
+}
+
+pub enum Validator {
+    Combine {
+        combination: CombineValidator,
+        combination_span: Span,
+        validators: Vec<Validator>
+    },
+    Single(SingleValidator),
+}
+
+impl FromMeta for Validator {
+    fn from_meta(meta: &Meta) -> darling::Result<Self> {
+        match meta {
+            Meta::List(list) => Some(list),
+            _ => None,
+        }
+        .and_then(|list| {
+            list.path
+                .get_ident()
+                .and_then(|i| {
+                    if i == "and" {
+                        Some((CombineValidator::And, i))
+                    } else if i == "or" {
+                        Some((CombineValidator::Or, i))
+                    } else {
+                        None
+                    }
+                })
+                .map(|(combination, ident)| (combination, ident.span(), list))
+        })
+        .map_or_else(
+            || Ok(Self::Single(SingleValidator::from_meta(meta)?)),
+            |(combination, combination_span, list)| {
+                Ok(Self::Combine {
+                    combination,
+                    combination_span,
+                    validators: list.nested
+                        .iter()
+                        .map(Self::from_nested_meta)
+                        .collect::<darling::Result<_>>()?,
+                })
+            },
+        )
+    }
+}
+
+pub enum CombineValidator {
+    And,
+    Or,
+}
+
+pub struct SingleValidator {
+    pub path: Path,
+    pub constructor_args: Vec<LitStr>,
+    pub methods: Vec<ValidatorMethod>,
+}
+
+impl FromMeta for SingleValidator {
+    fn from_meta(meta: &Meta) -> darling::Result<Self> {
+        Ok(match meta {
+            Meta::Path(path) => Self {
+                path: path.clone(),
+                constructor_args: Vec::new(),
+                methods: Vec::new(),
+            },
+            Meta::NameValue(nv) => Self {
+                path: nv.path.clone(),
+                constructor_args: vec![LitStr::from_value(&nv.lit)?],
+                methods: Vec::new(),
+            },
+            Meta::List(list) => {
+                let mut nested = list.nested.iter().fuse();
+
+                let constructor_args = nested
+                    .by_ref()
+                    .take_while(|nested| matches!(nested, NestedMeta::Lit(_)))
+                    .map(|nested| match nested {
+                        NestedMeta::Lit(lit) => LitStr::from_value(lit),
+                        _ => unreachable!(),
+                    })
+                    .collect::<darling::Result<_>>()?;
+
+                let methods = nested
+                    .map(|nested| match nested {
+                        NestedMeta::Meta(meta) => ValidatorMethod::from_meta(meta),
+                        nested => Err(darling::Error::custom(
+                            "validator constructor arguments must be before validator methods",
+                        )
+                        .with_span(nested)),
+                    })
+                    .collect::<darling::Result<_>>()?;
+
+                Self {
+                    path: list.path.clone(),
+                    constructor_args,
+                    methods,
+                }
+            }
+        })
+    }
+}
+
+pub struct ValidatorMethod {
+    pub name: Ident,
+    pub args: Vec<LitStr>,
+}
+
+impl FromMeta for ValidatorMethod {
+    fn from_meta(meta: &Meta) -> darling::Result<Self> {
+        let (path, args) = match meta {
+            Meta::Path(path) => (path, Vec::new()),
+            Meta::NameValue(nv) => (&nv.path, vec![LitStr::from_value(&nv.lit)?]),
+            Meta::List(list) => (
+                &list.path,
+                list.nested
+                    .iter()
+                    .map(LitStr::from_nested_meta)
+                    .collect::<darling::Result<_>>()?,
+            ),
+        };
+
+        Ok(Self {
+            name: path
+                .get_ident()
+                .ok_or_else(|| darling::Error::custom("expected method name").with_span(path))?
+                .clone(),
+            args,
+        })
+    }
 }

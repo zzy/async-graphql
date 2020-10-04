@@ -4,13 +4,12 @@ use crate::parser::types::{
     Value as InputValue,
 };
 use crate::schema::SchemaEnv;
-use crate::{
-    Error, InputValueType, Lookahead, Pos, Positioned, Result, ServerError, ServerResult,
-};
-use serde_value::Value;
+use crate::{Error, InputValueType, Lookahead, Pos, Positioned, Result, ServerError, ServerResult};
 use fnv::FnvHashMap;
+use serde::de::DeserializeOwned;
 use serde::ser::{SerializeSeq, Serializer};
 use serde::{Deserialize, Serialize};
+use serde_value::Value;
 use std::any::{Any, TypeId};
 use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
@@ -378,7 +377,7 @@ impl<'a, T> ContextBase<'a, T> {
             .and_then(|d| d.downcast_ref::<D>())
     }
 
-    fn var_value(&self, name: &str, pos: Pos) -> ServerResult<Value> {
+    fn var_value(&self, name: &Name) -> Option<Value> {
         self.query_env
             .operation
             .node
@@ -393,14 +392,15 @@ impl<'a, T> ContextBase<'a, T> {
                     .or_else(|| def.node.default_value())
             })
             .cloned()
-            .ok_or_else(|| ServerError::new(format!("Variable {} is not defined.", name)).at(pos))
     }
 
-    fn resolve_input_value(&self, value: Positioned<InputValue>) -> ServerResult<Value> {
+    fn resolve_input_value<T: DeserializeOwned>(
+        &self,
+        value: Positioned<InputValue>,
+    ) -> ServerResult<T> {
         let pos = value.pos;
-        value
-            .node
-            .into_const_with(|name| self.var_value(&name, pos))
+        T::deserialize(value.node.deserializer(|name| self.var_value(name)))
+            .map_err(|e: serde::de::value::Error| ServerError::new(e.to_string()).at(pos))
     }
 
     #[doc(hidden)]
@@ -426,11 +426,9 @@ impl<'a, T> ContextBase<'a, T> {
                 .clone();
 
             let pos = condition_input.pos;
-            let condition_input = self.resolve_input_value(condition_input)?;
+            let condition_input: bool = self.resolve_input_value(condition_input)?;
 
-            if include != bool::deserialize(condition_input)
-                    .map_err(|e| e.into_server_error().at(pos))?
-            {
+            if include != condition_input {
                 return Ok(true);
             }
         }

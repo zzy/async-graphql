@@ -7,13 +7,15 @@
 //! This follows the [June 2018 edition of the GraphQL spec](https://spec.graphql.org/June2018/).
 
 use crate::pos::Positioned;
-use serde::de::{self, Deserializer, Error as _, Unexpected, Visitor, IntoDeserializer};
+use serde::de::value::{MapDeserializer, SeqDeserializer, StringDeserializer, BorrowedStrDeserializer};
+use serde::de::{self, Deserializer, Error as _, IntoDeserializer, Unexpected, Visitor};
 use serde::ser::{Error as _, Serializer};
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{hash_map, BTreeMap, HashMap};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display, Formatter, Write};
+use std::marker::PhantomData;
 use std::ops::Deref;
 
 pub use executable::*;
@@ -241,6 +243,40 @@ impl<'de> IntoDeserializer<'de> for ConstValue {
     }
 }
 
+impl<'de> Deserializer<'de> for &'de ConstValue {
+    type Error = de::value::Error;
+    fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        match self {
+            ConstValue::Null => visitor.visit_unit(),
+            ConstValue::Number(n) => n.deserialize_any(visitor).map_err(de::Error::custom),
+            ConstValue::String(s) => visitor.visit_borrowed_str(&s),
+            &ConstValue::Boolean(b) => visitor.visit_bool(b),
+            ConstValue::Enum(v) => visitor.visit_enum(v.into_deserializer()),
+            ConstValue::List(a) => SeqDeserializer::new(a.iter()).deserialize_any(visitor),
+            ConstValue::Object(o) => MapDeserializer::new(o.iter()).deserialize_any(visitor),
+        }
+    }
+
+    fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        match self {
+            ConstValue::Null => visitor.visit_none(),
+            other => visitor.visit_some(other),
+        }
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+        bytes byte_buf unit unit_struct newtype_struct seq tuple
+        tuple_struct map struct enum identifier ignored_any
+    }
+}
+impl<'de> IntoDeserializer<'de> for &'de ConstValue {
+    type Deserializer = Self;
+    fn into_deserializer(self) -> Self::Deserializer {
+        self
+    }
+}
+
 /// A GraphQL value, for example `1`, `$name` or `"Hello World!"`. This is
 /// [`ConstValue`](enum.ConstValue.html) with variables.
 ///
@@ -272,45 +308,9 @@ pub enum Value {
 }
 
 impl Value {
-    /// Attempt to convert the value into a const value by using a function to get a variable.
-    pub fn into_const_with<E>(
-        self,
-        mut f: impl FnMut(Name) -> Result<ConstValue, E>,
-    ) -> Result<ConstValue, E> {
-        self.into_const_with_mut(&mut f)
-    }
-
-    fn into_const_with_mut<E>(
-        self,
-        f: &mut impl FnMut(Name) -> Result<ConstValue, E>,
-    ) -> Result<ConstValue, E> {
-        Ok(match self {
-            Self::Variable(name) => f(name)?,
-            Self::Null => ConstValue::Null,
-            Self::Number(num) => ConstValue::Number(num),
-            Self::String(s) => ConstValue::String(s),
-            Self::Boolean(b) => ConstValue::Boolean(b),
-            Self::Enum(v) => ConstValue::Enum(v),
-            Self::List(items) => ConstValue::List(
-                items
-                    .into_iter()
-                    .map(|value| value.into_const_with_mut(f))
-                    .collect::<Result<_, _>>()?,
-            ),
-            Self::Object(map) => ConstValue::Object(
-                map.into_iter()
-                    .map(|(key, value)| Ok((key, value.into_const_with_mut(f)?)))
-                    .collect::<Result<_, _>>()?,
-            ),
-        })
-    }
-
-    /// Attempt to convert the value into a const value.
-    ///
-    /// Will fail if the value contains variables.
-    #[must_use]
-    pub fn into_const(self) -> Option<ConstValue> {
-        self.into_const_with(|_| Err(())).ok()
+    /// Deserialize the value using a function to get the variables.
+    pub fn deserializer<F, E>(self, variables: &F) -> ValueDeserializer<'_, F, E> {
+        ValueDeserializer::new(self, variables)
     }
 
     /// Attempt to convert the value into JSON. This is equivalent to the `TryFrom` implementation.
@@ -411,6 +411,97 @@ fn write_object<K: Display, V: Display>(
     f.write_char('}')
 }
 
+/// A deserializer of `Value`s.
+#[derive(Debug, Clone)]
+pub struct ValueDeserializer<'a, F, E> {
+    /// The value being deserialized.
+    pub value: Value,
+    /// The function used to access the variables that are used in deserialization.
+    pub variables: &'a F,
+    marker: PhantomData<E>,
+}
+
+impl<'a, F, E> ValueDeserializer<'a, F, E> {
+    /// Construct a new `ValueDeserializer`.
+    #[must_use]
+    pub fn new(value: Value, variables: &'a F) -> Self {
+        Self {
+            value,
+            variables,
+            marker: PhantomData,
+        }
+    }
+}
+
+fn get_variable<'de, F, E, T>(variables: F, name: &Name) -> Result<T::Deserializer, E>
+where
+    F: FnOnce(&Name) -> Option<T>,
+    T: IntoDeserializer<'de, E>,
+    E: de::Error,
+{
+    (variables)(name)
+        .ok_or_else(|| E::custom(format_args!("variable {} is not defined", name)))
+        .map(T::into_deserializer)
+}
+
+impl<'a, 'de, F, E, T> Deserializer<'de> for ValueDeserializer<'a, F, E>
+where
+    F: Fn(&Name) -> Option<T>,
+    T: IntoDeserializer<'de, E>,
+    E: de::Error,
+{
+    type Error = E;
+
+    fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        let variables = self.variables;
+        match self.value {
+            Value::Variable(name) => get_variable(variables, &name)?.deserialize_any(visitor),
+            Value::Null => visitor.visit_unit(),
+            Value::Number(n) => n.deserialize_any(visitor).map_err(E::custom),
+            Value::String(s) => visitor.visit_string(s),
+            Value::Boolean(b) => visitor.visit_bool(b),
+            Value::Enum(v) => visitor.visit_enum(v.into_deserializer()),
+            Value::List(a) => SeqDeserializer::new(
+                a.into_iter()
+                    .map(|v| ValueDeserializer::new(v, variables)),
+            )
+            .deserialize_any(visitor),
+            Value::Object(o) => MapDeserializer::new(
+                o.into_iter()
+                    .map(|(k, v)| (k, ValueDeserializer::new(v, variables))),
+            )
+            .deserialize_any(visitor),
+        }
+    }
+
+    fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        let variables = self.variables;
+        match self.value {
+            Value::Variable(name) => get_variable(variables, &name)?.deserialize_option(visitor),
+            Value::Null => visitor.visit_none(),
+            value => visitor.visit_some(ValueDeserializer::new(value, variables)),
+        }
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+        bytes byte_buf unit unit_struct newtype_struct seq tuple
+        tuple_struct map struct enum identifier ignored_any
+    }
+}
+
+impl<'a, 'de, F, E, T> IntoDeserializer<'de, E> for ValueDeserializer<'a, F, E>
+where
+    F: Fn(&Name) -> Option<T>,
+    T: IntoDeserializer<'de, E>,
+    E: de::Error,
+{
+    type Deserializer = Self;
+    fn into_deserializer(self) -> Self::Deserializer {
+        self
+    }
+}
+
 /// A const GraphQL directive, such as `@deprecated(reason: "Use the other field)`. This differs
 /// from [`Directive`](struct.Directive.html) in that it uses [`ConstValue`](enum.ConstValue.html)
 /// instead of [`Value`](enum.Value.html).
@@ -460,21 +551,6 @@ pub struct Directive {
 }
 
 impl Directive {
-    /// Attempt to convert this `Directive` into a `ConstDirective`.
-    #[must_use]
-    pub fn into_const(self) -> Option<ConstDirective> {
-        Some(ConstDirective {
-            name: self.name,
-            arguments: self
-                .arguments
-                .into_iter()
-                .map(|(name, value)| {
-                    Some((name, Positioned::new(value.node.into_const()?, value.pos)))
-                })
-                .collect::<Option<_>>()?,
-        })
-    }
-
     /// Get the argument with the given name.
     #[must_use]
     pub fn get_argument(&self, name: &str) -> Option<&Positioned<Value>> {
@@ -613,9 +689,15 @@ impl<'de> Deserialize<'de> for Name {
 }
 
 impl<'de, E: de::Error> IntoDeserializer<'de, E> for Name {
-    type Deserializer = de::value::StringDeserializer<E>;
+    type Deserializer = StringDeserializer<E>;
     fn into_deserializer(self) -> Self::Deserializer {
         self.into_string().into_deserializer()
+    }
+}
+impl<'de, E: de::Error> IntoDeserializer<'de, E> for &'de Name {
+    type Deserializer = BorrowedStrDeserializer<'de, E>;
+    fn into_deserializer(self) -> Self::Deserializer {
+        BorrowedStrDeserializer::new(self.as_str())
     }
 }
 
