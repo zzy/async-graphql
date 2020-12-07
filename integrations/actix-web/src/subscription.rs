@@ -56,21 +56,12 @@ where
         T: Stream<Item = Result<Bytes, PayloadError>> + 'static,
         F: FnOnce(serde_json::Value) -> Result<Data> + Send + Sync + 'static,
     {
-        let protocol = match request
+        let protocol = request
             .headers()
             .get("sec-websocket-protocol")
             .and_then(|value| value.to_str().ok())
-            .and_then(|protocols| {
-                protocols
-                    .split(',')
-                    .find_map(|p| WebSocketProtocols::from_str(p.trim()).ok())
-            }) {
-            Some(protocol) => protocol,
-            None => {
-                // default to the prior standard
-                WebSocketProtocols::SubscriptionsTransportWS
-            }
-        };
+            .and_then(|value| WebSocketProtocols::from_str(value).ok())
+            .unwrap_or_default();
 
         actix_web_actors::ws::start_with_protocols(
             Self {

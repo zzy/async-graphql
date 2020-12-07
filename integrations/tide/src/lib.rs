@@ -11,6 +11,9 @@
 #![allow(clippy::needless_doctest_main)]
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "unstable")]
+mod websocket;
+
 use async_graphql::http::MultipartOptions;
 use async_graphql::{ObjectType, ParseRequestError, Schema, SubscriptionType};
 use tide::utils::async_trait;
@@ -21,6 +24,9 @@ use tide::{
     },
     Body, Request, Response, StatusCode,
 };
+
+#[cfg(feature = "unstable")]
+pub use websocket::WebSocket;
 
 /// Create a new GraphQL endpoint with the schema.
 ///

@@ -181,6 +181,12 @@ pub enum Protocols {
     GraphQLWS,
 }
 
+impl Default for Protocols {
+    fn default() -> Self {
+        Self::SubscriptionsTransportWS
+    }
+}
+
 impl Protocols {
     /// Returns the `Sec-WebSocket-Protocol` header value for the protocol
     pub fn sec_websocket_protocol(&self) -> &str {
