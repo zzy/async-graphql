@@ -399,7 +399,7 @@ pub fn generate(interface_args: &args::Interface) -> GeneratorResult<TokenStream
 
                 fn create_type_info(
                     registry: &mut #crate_name::registry::Registry,
-                    fields: #crate_name::index_map::IndexMap<::std::string::String, #crate_name::registry::MetaField>,
+                    fields: #crate_name::indexmap::IndexMap<::std::string::String, #crate_name::registry::MetaField>,
                 ) -> std::string::String {
                     registry.create_type::<Self, _>(move |registry| {
                         #(#registry_types)*
@@ -419,9 +419,14 @@ pub fn generate(interface_args: &args::Interface) -> GeneratorResult<TokenStream
                         }
                     })
                 }
+
+                fn collect_all_fields<'__life>(&'__life self, ctx: &#crate_name::ContextSelectionSet<'__life>, fields: &mut #crate_name::resolver_utils::Fields<'__life>) -> #crate_name::ServerResult<()> {
+                    match self {
+                        #(#collect_all_fields),*
+                    }
+                }
             }
         }
     };
-
     Ok(expanded.into())
 }

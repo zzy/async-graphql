@@ -29,8 +29,9 @@ pub async fn test_interface_simple_object() {
 
     let query = r#"{
             node {
+                id
                 ... on Node {
-                    id
+                    id2: id
                 }
             }
         }"#;
@@ -40,6 +41,7 @@ pub async fn test_interface_simple_object() {
         value!({
             "node": {
                 "id": 33,
+                "id2": 33,
             }
         })
     );
@@ -74,8 +76,9 @@ pub async fn test_interface_simple_object2() {
 
     let query = r#"{
             node {
+                id
                 ... on Node {
-                    id
+                    id2: id
                 }
             }
         }"#;
@@ -85,6 +88,7 @@ pub async fn test_interface_simple_object2() {
         value!({
             "node": {
                 "id": 33,
+                "id2": 33,
             }
         })
     );
@@ -144,6 +148,7 @@ pub async fn test_multiple_interfaces() {
               ... on MyObj {
                 valueC
               }
+              valueB2: valueB
             }
         }"#;
     assert_eq!(
@@ -152,6 +157,7 @@ pub async fn test_multiple_interfaces() {
             "myObj": {
                 "valueA": 1,
                 "valueB": 2,
+                "valueB2": 2,
                 "valueC": 3,
             }
         })
@@ -222,6 +228,7 @@ pub async fn test_multiple_objects_in_multiple_interfaces() {
                ... on MyObjOne {
                  valueC
                }
+               valueA2: valueA
              }
          }"#;
     assert_eq!(
@@ -229,10 +236,12 @@ pub async fn test_multiple_objects_in_multiple_interfaces() {
         value!({
             "myObj": [{
                 "valueA": 1,
+                "valueA2": 1,
                 "valueB": 2,
                 "valueC": 3,
             }, {
-                "valueA": 1
+                "valueA": 1,
+                "valueA2": 1,
             }]
         })
     );
@@ -266,9 +275,7 @@ pub async fn test_interface_field_result() {
 
     let query = r#"{
             node {
-                ... on Node {
-                    value
-                }
+                value
             }
         }"#;
     let schema = Schema::new(Query, EmptyMutation, EmptySubscription);
@@ -477,22 +484,37 @@ pub async fn test_issue_330() {
 #[async_std::test]
 pub async fn test_interface_impl() {
     #[derive(SimpleObject)]
-    struct MyObj {
+    struct MyObj1 {
         id: i32,
         title: String,
+    }
+
+    #[derive(SimpleObject)]
+    struct MyObj2 {
+        id: i32,
+        name: String,
     }
 
     #[derive(Interface)]
     #[graphql(impl)]
     enum Node {
-        MyObj(MyObj),
+        MyObj1(MyObj1),
+        MyObj2(MyObj2),
     }
 
     #[InterfaceImpl]
     impl Node {
         async fn id(&self) -> i32 {
             match self {
-                Node::MyObj(obj) => obj.id,
+                Node::MyObj1(obj) => obj.id,
+                Node::MyObj2(obj) => obj.id,
+            }
+        }
+
+        async fn add(&self, n: i32) -> i32 {
+            match self {
+                Node::MyObj1(obj) => obj.id + n,
+                Node::MyObj2(obj) => obj.id + n,
             }
         }
     }
@@ -501,19 +523,37 @@ pub async fn test_interface_impl() {
 
     #[Object]
     impl Query {
-        async fn node(&self) -> Node {
-            MyObj {
-                id: 33,
-                title: "haha".to_string(),
-            }
-            .into()
+        async fn nodes(&self) -> Vec<Node> {
+            vec![
+                MyObj1 {
+                    id: 1,
+                    title: "haha".to_string(),
+                }
+                .into(),
+                MyObj2 {
+                    id: 2,
+                    name: "hehe".to_string(),
+                }
+                .into(),
+            ]
         }
     }
 
     let query = r#"{
-            node {
+            nodes {
+                id
+                id2: add(n: 5)
                 ... on Node {
-                    id
+                    id3: id
+                    id4: add(n: 5)
+                    ... on MyObj1 {
+                        __typename
+                        title
+                    }
+                    ... on MyObj2 {
+                        __typename
+                        name
+                    }
                 }
             }
         }"#;
@@ -521,9 +561,24 @@ pub async fn test_interface_impl() {
     assert_eq!(
         schema.execute(query).await.into_result().unwrap().data,
         value!({
-            "node": {
-                "id": 33,
-            }
+            "nodes": [
+                {
+                    "id": 1,
+                    "id2": 6,
+                    "id3": 1,
+                    "id4": 6,
+                    "__typename": "MyObj1",
+                    "title": "haha",
+                },
+                {
+                    "id": 2,
+                    "id2": 7,
+                    "id3": 2,
+                    "id4": 7,
+                    "__typename": "MyObj2",
+                    "name": "hehe",
+                }
+            ]
         })
     );
 }

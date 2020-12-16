@@ -291,9 +291,9 @@ pub struct Registry {
 }
 
 impl Registry {
-    pub fn create_type<T: crate::Type, F: FnMut(&mut Registry) -> MetaType>(
+    pub fn create_type<T: crate::Type, F: FnOnce(&mut Registry) -> MetaType>(
         &mut self,
-        mut f: F,
+        f: F,
     ) -> String {
         let name = T::type_name();
         if !self.types.contains_key(name.as_ref()) {

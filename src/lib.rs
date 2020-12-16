@@ -674,6 +674,8 @@ pub use async_graphql_derive::InputObject;
 /// ```
 pub use async_graphql_derive::Interface;
 
+pub use async_graphql_derive::InterfaceImpl;
+
 /// Define a GraphQL union
 ///
 /// *[See also the Book](https://async-graphql.github.io/async-graphql/en/define_union.html).*

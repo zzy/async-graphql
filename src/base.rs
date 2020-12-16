@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 
 use crate::parser::types::Field;
 use crate::registry::{MetaField, Registry};
+use crate::resolver_utils::Fields;
 use crate::{
     registry, ContainerType, ContextSelectionSet, InputValueResult, Positioned, Result,
     ServerResult, Value,
@@ -119,11 +120,21 @@ pub trait InterfaceType: ContainerType {}
 #[doc(hidden)]
 pub trait InterfaceDefinition {
     fn type_name() -> Cow<'static, str>;
+
     fn introspection_type_name(&self) -> Cow<'static, str>;
+
     fn create_type_info(
         registry: &mut registry::Registry,
         fields: IndexMap<String, MetaField>,
     ) -> String;
+
+    fn collect_all_fields<'a>(
+        &'a self,
+        ctx: &ContextSelectionSet<'a>,
+        fields: &mut Fields<'a>,
+    ) -> ServerResult<()>
+    where
+        Self: Sized + Send + Sync;
 }
 
 /// A GraphQL interface.

@@ -1,1 +1,18 @@
-union UndefinedUnion
+interface NamedEntity {
+    name: String
+}
+
+interface ValuedEntity {
+    value: Int
+}
+
+type Person implements NamedEntity {
+    name1: String
+    age: Int
+}
+
+type Business implements NamedEntity & ValuedEntity {
+    name: String
+    value: Int
+    employeeCount: Int
+}

@@ -8,6 +8,7 @@ mod description;
 mod r#enum;
 mod input_object;
 mod interface;
+mod interface_impl;
 mod merged_object;
 mod merged_subscription;
 mod object;
@@ -83,6 +84,21 @@ pub fn derive_interface(input: TokenStream) -> TokenStream {
             Err(err) => return TokenStream::from(err.write_errors()),
         };
     match interface::generate(&interface_args) {
+        Ok(expanded) => expanded,
+        Err(err) => err.write_errors().into(),
+    }
+}
+
+#[proc_macro_attribute]
+#[allow(non_snake_case)]
+pub fn InterfaceImpl(args: TokenStream, input: TokenStream) -> TokenStream {
+    let interface_args =
+        match args::InterfaceImpl::from_list(&parse_macro_input!(args as AttributeArgs)) {
+            Ok(interface_args) => interface_args,
+            Err(err) => return TokenStream::from(err.write_errors()),
+        };
+    let mut item_impl = parse_macro_input!(input as ItemImpl);
+    match interface_impl::generate(&interface_args, &mut item_impl) {
         Ok(expanded) => expanded,
         Err(err) => err.write_errors().into(),
     }

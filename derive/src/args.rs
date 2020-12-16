@@ -333,6 +333,36 @@ pub struct Interface {
 
 #[derive(FromMeta, Default)]
 #[darling(default)]
+pub struct InterfaceImplField {
+    pub skip: bool,
+    pub name: Option<String>,
+    pub deprecation: Option<String>,
+    pub external: bool,
+    pub provides: Option<String>,
+    pub requires: Option<String>,
+    pub visible: Option<Visible>,
+}
+
+#[derive(FromMeta, Default)]
+#[darling(default)]
+pub struct InterfaceImplFieldArgument {
+    pub name: Option<String>,
+    pub desc: Option<String>,
+    pub default: Option<DefaultValue>,
+    pub default_with: Option<LitStr>,
+    pub visible: Option<Visible>,
+}
+
+#[derive(FromMeta, Default)]
+#[darling(default)]
+pub struct InterfaceImpl {
+    pub internal: bool,
+    pub rename_fields: Option<RenameRule>,
+    pub rename_args: Option<RenameRule>,
+}
+
+#[derive(FromMeta, Default)]
+#[darling(default)]
 pub struct Scalar {
     pub internal: bool,
     pub name: Option<String>,
