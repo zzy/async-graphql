@@ -473,3 +473,57 @@ pub async fn test_issue_330() {
         })
     );
 }
+
+#[async_std::test]
+pub async fn test_interface_impl() {
+    #[derive(SimpleObject)]
+    struct MyObj {
+        id: i32,
+        title: String,
+    }
+
+    #[derive(Interface)]
+    #[graphql(impl)]
+    enum Node {
+        MyObj(MyObj),
+    }
+
+    #[InterfaceImpl]
+    impl Node {
+        async fn id(&self) -> i32 {
+            match self {
+                Node::MyObj(obj) => obj.id,
+            }
+        }
+    }
+
+    struct Query;
+
+    #[Object]
+    impl Query {
+        async fn node(&self) -> Node {
+            MyObj {
+                id: 33,
+                title: "haha".to_string(),
+            }
+            .into()
+        }
+    }
+
+    let query = r#"{
+            node {
+                ... on Node {
+                    id
+                }
+            }
+        }"#;
+    let schema = Schema::new(Query, EmptyMutation, EmptySubscription);
+    assert_eq!(
+        schema.execute(query).await.into_result().unwrap().data,
+        value!({
+            "node": {
+                "id": 33,
+            }
+        })
+    );
+}

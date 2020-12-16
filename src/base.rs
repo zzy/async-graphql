@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 
+use indexmap::IndexMap;
+
 use crate::parser::types::Field;
-use crate::registry::Registry;
+use crate::registry::{MetaField, Registry};
 use crate::{
     registry, ContainerType, ContextSelectionSet, InputValueResult, Positioned, Result,
     ServerResult, Value,
@@ -113,6 +115,16 @@ impl<T: ObjectType + Send + Sync> ObjectType for &T {}
 
 /// A GraphQL interface.
 pub trait InterfaceType: ContainerType {}
+
+#[doc(hidden)]
+pub trait InterfaceDefinition {
+    fn type_name() -> Cow<'static, str>;
+    fn introspection_type_name(&self) -> Cow<'static, str>;
+    fn create_type_info(
+        registry: &mut registry::Registry,
+        fields: IndexMap<String, MetaField>,
+    ) -> String;
+}
 
 /// A GraphQL interface.
 pub trait UnionType: ContainerType {}

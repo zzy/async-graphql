@@ -325,6 +325,8 @@ pub struct Interface {
     pub fields: Vec<InterfaceField>,
     #[darling(default)]
     pub extends: bool,
+    #[darling(default, rename = "impl")]
+    pub impl_: bool,
     #[darling(default)]
     pub visible: Option<Visible>,
 }

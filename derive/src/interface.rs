@@ -121,10 +121,16 @@ pub fn generate(interface_args: &args::Interface) -> GeneratorResult<TokenStream
     let mut schema_fields = Vec::new();
     let mut resolvers = Vec::new();
 
-    if interface_args.fields.is_empty() {
+    if !interface_args.impl_ && interface_args.fields.is_empty() {
         return Err(Error::new_spanned(
             &ident,
             "A GraphQL Interface type must define one or more fields.",
+        )
+        .into());
+    } else if interface_args.impl_ && !interface_args.fields.is_empty() {
+        return Err(Error::new_spanned(
+            &ident,
+            "If the `impl` attribute is used, there must not be any `field` attributes.",
         )
         .into());
     }
@@ -307,73 +313,115 @@ pub fn generate(interface_args: &args::Interface) -> GeneratorResult<TokenStream
     };
 
     let visible = visible_fn(&interface_args.visible);
-    let expanded = quote! {
-        #(#type_into_impls)*
 
-        #[allow(clippy::all, clippy::pedantic)]
-        impl #generics #ident #generics {
-            #(#methods)*
-        }
+    let expanded = if !interface_args.impl_ {
+        quote! {
+            #(#type_into_impls)*
 
-        #[allow(clippy::all, clippy::pedantic)]
-        impl #generics #crate_name::Type for #ident #generics {
-            fn type_name() -> ::std::borrow::Cow<'static, ::std::primitive::str> {
-                ::std::borrow::Cow::Borrowed(#gql_typename)
+            #[allow(clippy::all, clippy::pedantic)]
+            impl #generics #ident #generics {
+                #(#methods)*
             }
 
-            fn introspection_type_name(&self) -> ::std::borrow::Cow<'static, ::std::primitive::str> {
-                #introspection_type_name
+            #[allow(clippy::all, clippy::pedantic)]
+            impl #generics #crate_name::Type for #ident #generics {
+                fn type_name() -> ::std::borrow::Cow<'static, ::std::primitive::str> {
+                    ::std::borrow::Cow::Borrowed(#gql_typename)
+                }
+
+                fn introspection_type_name(&self) -> ::std::borrow::Cow<'static, ::std::primitive::str> {
+                    #introspection_type_name
+                }
+
+                fn create_type_info(registry: &mut #crate_name::registry::Registry) -> ::std::string::String {
+                    registry.create_type::<Self, _>(|registry| {
+                        #(#registry_types)*
+
+                        #crate_name::registry::MetaType::Interface {
+                            name: ::std::string::ToString::to_string(#gql_typename),
+                            description: #desc,
+                            fields: {
+                                let mut fields = #crate_name::indexmap::IndexMap::new();
+                                #(#schema_fields)*
+                                fields
+                            },
+                            possible_types: {
+                                let mut possible_types = #crate_name::indexmap::IndexSet::new();
+                                #(#possible_types)*
+                                possible_types
+                            },
+                            extends: #extends,
+                            keys: ::std::option::Option::None,
+                            visible: #visible,
+                        }
+                    })
+                }
             }
 
-            fn create_type_info(registry: &mut #crate_name::registry::Registry) -> ::std::string::String {
-                registry.create_type::<Self, _>(|registry| {
-                    #(#registry_types)*
+            #[allow(clippy::all, clippy::pedantic)]
+            #[#crate_name::async_trait::async_trait]
+            impl #generics #crate_name::resolver_utils::ContainerType for #ident #generics {
+                async fn resolve_field(&self, ctx: &#crate_name::Context<'_>) -> #crate_name::ServerResult<::std::option::Option<#crate_name::Value>> {
+                    #(#resolvers)*
+                    ::std::result::Result::Ok(::std::option::Option::None)
+                }
 
-                    #crate_name::registry::MetaType::Interface {
-                        name: ::std::string::ToString::to_string(#gql_typename),
-                        description: #desc,
-                        fields: {
-                            let mut fields = #crate_name::indexmap::IndexMap::new();
-                            #(#schema_fields)*
-                            fields
-                        },
-                        possible_types: {
-                            let mut possible_types = #crate_name::indexmap::IndexSet::new();
-                            #(#possible_types)*
-                            possible_types
-                        },
-                        extends: #extends,
-                        keys: ::std::option::Option::None,
-                        visible: #visible,
+                fn collect_all_fields<'__life>(&'__life self, ctx: &#crate_name::ContextSelectionSet<'__life>, fields: &mut #crate_name::resolver_utils::Fields<'__life>) -> #crate_name::ServerResult<()> {
+                    match self {
+                        #(#collect_all_fields),*
                     }
-                })
+                }
             }
+
+            #[allow(clippy::all, clippy::pedantic)]
+            #[#crate_name::async_trait::async_trait]
+            impl #generics #crate_name::OutputType for #ident #generics {
+                async fn resolve(&self, ctx: &#crate_name::ContextSelectionSet<'_>, _field: &#crate_name::Positioned<#crate_name::parser::types::Field>) -> #crate_name::ServerResult<#crate_name::Value> {
+                    #crate_name::resolver_utils::resolve_container(ctx, self).await
+                }
+            }
+
+            impl #generics #crate_name::InterfaceType for #ident #generics {}
         }
+    } else {
+        quote! {
+            #(#type_into_impls)*
 
-        #[allow(clippy::all, clippy::pedantic)]
-        #[#crate_name::async_trait::async_trait]
-        impl #generics #crate_name::resolver_utils::ContainerType for #ident #generics {
-            async fn resolve_field(&self, ctx: &#crate_name::Context<'_>) -> #crate_name::ServerResult<::std::option::Option<#crate_name::Value>> {
-                #(#resolvers)*
-                ::std::result::Result::Ok(::std::option::Option::None)
-            }
+            #[allow(clippy::all, clippy::pedantic)]
+            impl #generics #crate_name::InterfaceDefinition for #ident #generics {
+                fn type_name() -> ::std::borrow::Cow<'static, ::std::primitive::str> {
+                    ::std::borrow::Cow::Borrowed(#gql_typename)
+                }
 
-            fn collect_all_fields<'__life>(&'__life self, ctx: &#crate_name::ContextSelectionSet<'__life>, fields: &mut #crate_name::resolver_utils::Fields<'__life>) -> #crate_name::ServerResult<()> {
-                match self {
-                    #(#collect_all_fields),*
+                fn introspection_type_name(&self) -> ::std::borrow::Cow<'static, ::std::primitive::str> {
+                    #introspection_type_name
+                }
+
+                fn create_type_info(
+                    registry: &mut #crate_name::registry::Registry,
+                    fields: #crate_name::index_map::IndexMap<::std::string::String, #crate_name::registry::MetaField>,
+                ) -> std::string::String {
+                    registry.create_type::<Self, _>(move |registry| {
+                        #(#registry_types)*
+
+                        #crate_name::registry::MetaType::Interface {
+                            name: ::std::string::ToString::to_string(#gql_typename),
+                            description: #desc,
+                            fields,
+                            possible_types: {
+                                let mut possible_types = #crate_name::indexmap::IndexSet::new();
+                                #(#possible_types)*
+                                possible_types
+                            },
+                            extends: #extends,
+                            keys: ::std::option::Option::None,
+                            visible: #visible,
+                        }
+                    })
                 }
             }
         }
-
-        #[allow(clippy::all, clippy::pedantic)]
-        #[#crate_name::async_trait::async_trait]
-        impl #generics #crate_name::OutputType for #ident #generics {
-            async fn resolve(&self, ctx: &#crate_name::ContextSelectionSet<'_>, _field: &#crate_name::Positioned<#crate_name::parser::types::Field>) -> #crate_name::ServerResult<#crate_name::Value> {
-                #crate_name::resolver_utils::resolve_container(ctx, self).await
-            }
-        }
-
-        impl #generics #crate_name::InterfaceType for #ident #generics {}
     };
+
     Ok(expanded.into())
 }

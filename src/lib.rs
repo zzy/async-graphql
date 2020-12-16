@@ -207,7 +207,8 @@ pub use async_graphql_value::{
     SerializerError,
 };
 pub use base::{
-    Description, InputObjectType, InputType, InterfaceType, ObjectType, OutputType, Type, UnionType,
+    Description, InputObjectType, InputType, InterfaceDefinition, InterfaceType, ObjectType,
+    OutputType, Type, UnionType,
 };
 pub use error::{
     Error, ErrorExtensionValues, ErrorExtensions, InputValueError, InputValueResult,
