@@ -8,7 +8,9 @@
 
 - The `external` property declares that a field comes from another service。
 
-- The `provides` property indicates the fields provided by a service. 
+- The `provides` directive is used to annotate the expected returned fieldset from a field on a base type that is guaranteed to be selectable by the gateway. 
+
+- The `requires` directive is used to annotate the required input fieldset from a base type for a resolver. It is used to develop a query plan where the required fields may not be needed by the client, but the service may need additional information from other services.
 
 ## Entity lookup function
 
@@ -49,3 +51,27 @@ impl Query {
     Use `id` and `username` to find an `User` object, the keys for `User` are `id` and `username`.
 
 For a complete example, refer to: <https://github.com/async-graphql/examples/tree/master/federation>.
+
+## Defining a compound primary key
+
+A single primary key can consist of multiple fields, and even nested fields, you can use `InputObject` to implements a nested primary key.
+
+In the following example, the primary key of the `User` object is `key { a b }`.
+
+```rust
+#[derive(InputObject)]
+struct NestedKey {
+  a: i32,
+  b: i32,
+}
+
+struct Query;
+
+#[Object]
+impl Query {
+  #[entity]
+  async fn find_user_by_key(&self, key: NestedKey) -> User {
+    User { ... }
+  }
+}
+```
